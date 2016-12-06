@@ -1,0 +1,7 @@
+#!/bin/bash
+
+obmcutil poweron;
+sleep 20;
+echo 1 > /sys/bus/platform/devices/fsi-master/scan;
+cd /tmp;
+chmod 755 fsitest;

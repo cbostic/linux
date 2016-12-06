@@ -1,0 +1,41 @@
+#
+# FSI subsystem
+#
+
+menu "FSI support"
+
+config FSI
+	tristate "FSI support"
+	---help---
+	  FSI - the FRU Support Interface - is a simple bus for low-level
+	  access to POWER-based hardware.
+
+if FSI
+
+config FSI_MASTER_FAKE
+	tristate "Fake FSI master"
+	depends on FSI
+	---help---
+	This option enables a fake FSI master driver for debugging.
+
+config FSI_MASTER_GPIO
+	tristate "GPIO-based FSI master"
+	depends on FSI
+	---help---
+	This option enables a FSI master driver using GPIO lines.
+
+config FSI_SCOM
+	tristate "SCOM FSI client device driver"
+	depends on FSI
+	---help---
+	This option enables an FSI based SCOM device driver.
+
+config FSI_MBX
+	tristate "Mailbox FSI client device driver"
+	depends on FSI
+	---help---
+	This option enables an FSI based Mailbox device driver.
+
+endif
+
+endmenu
