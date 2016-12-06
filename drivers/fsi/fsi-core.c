@@ -329,7 +329,7 @@ static int fsi_slave_scan(struct fsi_slave *slave)
 		printk("error reading 0x28E0\n");
 		return 0;
 	}
-	printk("slave write to 0x28E0\n", conf);
+	printk("slave read 0x28E0\n");
 	rc = fsi_slave_read(slave, 0x28E0, &conf, sizeof(conf));
 	if (rc) {
 		printk("error reading 0x28E0\n");
