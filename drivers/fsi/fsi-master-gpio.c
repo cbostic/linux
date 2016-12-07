@@ -487,7 +487,6 @@ static int fsi_master_gpio_probe(struct platform_device *pdev)
 {
 	struct fsi_master_gpio *master;
 	struct gpio_desc *gpio;
-	int rc;
 
 	printk("fsi_master_gpio_probe >> 1206.1352\n");
 	master = devm_kzalloc(&pdev->dev, sizeof(*master), GFP_KERNEL);

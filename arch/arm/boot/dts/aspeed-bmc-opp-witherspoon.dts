@@ -2,6 +2,7 @@
 
 #include "aspeed-g5.dtsi"
 #include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/gpio/aspeed-gpio.h>
 
 / {
 	model = "Witherspoon BMC";
