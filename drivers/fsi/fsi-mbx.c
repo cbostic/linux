@@ -61,10 +61,10 @@ static ssize_t mbx_read(struct file *filep, char __user *buf, size_t len,
 				(struct miscdevice *)filep->private_data;
 	struct mbx_device *mbx = to_mbx_dev(mdev);
 
-printk("mbx_read >>\n");
+printk("mbx_read >> engine offset:%08x\n", pos);
 //	if (!mbx_offset_valid(pos))
 //		return -ERANGE;
-
+pos = 0x000000E0;
 	rc = fsi_device_read(mbx->fsi_dev, pos, &value, sizeof(value));
 	if (rc) {
 printk("fsi_device_read failed\n");
@@ -97,7 +97,8 @@ printk("mbx_write >> offset %08x\n", pos);
 	rc = copy_from_user(&value, buf, sizeof(value));
 	if (rc)
 		return -EFAULT;
-
+pos = 0x000000E0;
+printk("mbx_write: value to write:%08x\n", value);
 	rc = fsi_device_write(mbx->fsi_dev, pos, &value, sizeof(value));
 	if (rc) {
 printk("fsi_device_write failed\n");
@@ -107,95 +108,11 @@ printk("fsi_device_write failed\n");
 	return 0;
 }
 
-static long mbx_ioctl(struct file *filep, uint32_t cmd, unsigned long data)
-{
-	struct miscdevice *mdev =
-				(struct miscdevice *)filep->private_data;
-	struct mbx_device *mbx = to_mbx_dev(mdev);
-	struct device *dev = &mbx->fsi_dev->dev;
-	ssize_t rc;
-	struct mbx_reg_data reg;
-
-printk("MBXDD: ioctl>> cmd:%08x  WRITE:%08x  READ:%08x\n", cmd, MBX_IOCTL_WRITE_REG,
-								MBX_IOCTL_READ_REG);
-	switch (cmd) {
-	case MBX_IOCTL_WRITE_REG:
-printk("MBXDD: ioctl   WRITE_REG case >>\n");
-		if (!data) {
-			dev_info(dev, "Empty ioctl data\n");
-printk("MBXDD: no data, return err\n");
-			return -EINVAL;
-		}
-printk("MBXDD: data ok, now copy from user\n");
-		rc = copy_from_user(&reg, (void *)data, sizeof(reg));
-		if (rc) {
-printk("MBXDD:  copy from user failed:%d\n", rc);
-			dev_info(dev, "Failed to copy from user\n");
-			return -EFAULT;
-		}
-printk("MBXDD: copy from user ok\n");
-		if (mbx_offset_valid(reg.offset)) {
-printk("MBXDD: offset valid: %08x\n", reg.offset);
-			rc = fsi_device_write(mbx->fsi_dev, reg.offset,
-					&reg.value, sizeof(reg.value));
-printk("MBXDD: fsi write returns %d\n", rc);
-		} else {
-printk("MBXDD: offset invalid: %08x\n", reg.offset);
-			return -EINVAL;
-		}
-		break;
-
-	case MBX_IOCTL_READ_REG:
-
-printk("MBXDD: ioctl   READ_REG case >>\n");
-		if (!data) {
-			dev_info(dev, "Empty ioctl data\n");
-printk("MBXDD: no data, return err\n");
-			return -EINVAL;
-		}
-printk("MBXDD: data ok, now copy from user\n");
-		rc = copy_from_user(&reg, (void *)data, sizeof(reg));
-		if (rc) {
-printk("MBXDD: copy from user failed:%d\n", rc);
-			dev_info(dev, "Failed to copy from user\n");
-			return -EFAULT;
-		}
-
-printk("MBXDD: copy from user ok\n");
-		if (mbx_offset_valid(reg.offset)) {
-printk("MBXDD: offset valid: %08x\n", reg.offset);
-			rc = fsi_device_read(mbx->fsi_dev, reg.offset,
-					&reg.value, sizeof(reg.value));
-printk("MBXDD: rc from read:%d\n", rc);
-			if (rc)
-				return rc;
-printk("MBXDD: read ok: %08x\n", reg.value);
-			rc = copy_to_user((void *)data, &reg, sizeof(reg));
-			if (rc) {
-printk(":MBXDD: copy to user failed: %d\n", rc);
-				dev_info(dev, "copy to user failed\n");
-				return -EFAULT;
-			}
-printk("MBXDD: copy to user ok\n");
-		} else {
-printk("MBXDD: offset invalid: %08x\n", reg.offset);
-			return -EINVAL;
-		}
-		break;
-	default:
-printk("MBXDD: Invalid ioctl number\n");
-		dev_info(dev, "Ivalid ioctl command:%d\n", cmd);
-		return -EINVAL;
-	}
-	return rc;
-};
-
 static const struct file_operations mbx_fops = {
 	.owner	= THIS_MODULE,
 	.llseek	= no_seek_end_llseek,
 	.read	= mbx_read,
 	.write	= mbx_write,
-	.compat_ioctl  = mbx_ioctl,
 };
 
 static int mbx_probe(struct device *dev)

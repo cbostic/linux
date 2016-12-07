@@ -59,6 +59,7 @@
 #define	FSI_GPIO_MSG_ID_SIZE		2
 #define	FSI_GPIO_MSG_RESPID_SIZE	2
 #define	FSI_GPIO_PRIME_SLAVE_CLOCKS	100
+#define	FSI_GPIO_PRE_PRIME_CLOCKS	1000
 
 DEFINE_SPINLOCK(fsi_gpio_cmd_lock);	/* lock around all fsi commands */
 
@@ -84,10 +85,8 @@ static void clock_toggle(struct fsi_master_gpio *master, int count)
 
 	for (i = 0; i < count; i++) {
 		ndelay(FSI_GPIO_STD_DLY);
-//		udelay(100);
 		gpiod_set_value(master->gpio_clk, 0);
 		ndelay(FSI_GPIO_STD_DLY);
-//		udelay(100);
 		gpiod_set_value(master->gpio_clk, 1);
 	}
 }
@@ -97,20 +96,17 @@ static int sda_in(struct fsi_master_gpio *master)
 	int in;
 
 	ndelay(FSI_GPIO_STD_DLY);
-//	udelay(100);
 	in = gpiod_get_value(master->gpio_data);
 	return in ? 1 : 0;
 }
 
 static void sda_out(struct fsi_master_gpio *master, int value)
 {
-//	udelay(100);
 	gpiod_set_value(master->gpio_data, value);
 }
 
 static void set_sda_input(struct fsi_master_gpio *master)
 {
-//	udelay(100);
 	gpiod_direction_input(master->gpio_data);
 	if (master->gpio_trans)
 		gpiod_set_value(master->gpio_trans, 0);
@@ -118,7 +114,6 @@ static void set_sda_input(struct fsi_master_gpio *master)
 
 static void set_sda_output(struct fsi_master_gpio *master, int value)
 {
-//	udelay(100);
 	if (master->gpio_trans)
 		gpiod_set_value(master->gpio_trans, 1);
 	gpiod_direction_output(master->gpio_data, value);
@@ -181,6 +176,16 @@ static void echo_delay(struct fsi_master_gpio *master)
 {
 	set_sda_output(master, 1);
 	clock_toggle(master, FSI_ECHO_DELAY_CLOCKS);
+}
+
+/*
+ * Prime the slave by clocking it so that its ready for follow on
+ * read/write operations.
+ */
+static void prime_data(struct fsi_master_gpio *master)
+{
+	set_sda_output(master, 1);
+	clock_toggle(master, FSI_GPIO_PRE_PRIME_CLOCKS);
 }
 
 /*
@@ -373,7 +378,7 @@ static int fsi_master_gpio_read(struct fsi_master *_master, int link,
 	int rc;
 	unsigned long flags;
 
-printk("fsi_master_gpio_read >> link:%d slave:%d addr:%08x size:%d\n",
+printk("1207.1813 fsi_master_gpio_read >> link:%d slave:%d addr:%08x size:%d\n",
 				link, slave, addr, size);
 
 	if (link != 0)
@@ -382,6 +387,7 @@ printk("fsi_master_gpio_read >> link:%d slave:%d addr:%08x size:%d\n",
 	build_abs_ar_command(&cmd, FSI_GPIO_CMD_READ, slave, addr, size, NULL);
 
 	spin_lock_irqsave(&fsi_gpio_cmd_lock, flags);
+	prime_data(master);
 	serial_out(master, &cmd);
 	echo_delay(master);
 	rc = poll_for_response(master, FSI_GPIO_RESP_ACKD, size, val);
@@ -406,6 +412,7 @@ printk("fsi_master_gpio_write >> link:%d slave:%d addr:%08x val:%08x size:%d\n",
 	build_abs_ar_command(&cmd, FSI_GPIO_CMD_WRITE, slave, addr, size, val);
 
 	spin_lock_irqsave(&fsi_gpio_cmd_lock, flags);
+	prime_data(master);
 	serial_out(master, &cmd);
 	echo_delay(master);
 	rc = poll_for_response(master, FSI_GPIO_RESP_ACK, size, NULL);
