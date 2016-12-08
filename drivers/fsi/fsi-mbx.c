@@ -61,10 +61,10 @@ static ssize_t mbx_read(struct file *filep, char __user *buf, size_t len,
 				(struct miscdevice *)filep->private_data;
 	struct mbx_device *mbx = to_mbx_dev(mdev);
 
-printk("mbx_read >> engine offset:%08x\n", pos);
+printk("mbx_read >>>> engine offset:%08x\n", pos);
 //	if (!mbx_offset_valid(pos))
 //		return -ERANGE;
-pos = 0x000000E0;
+
 	rc = fsi_device_read(mbx->fsi_dev, pos, &value, sizeof(value));
 	if (rc) {
 printk("fsi_device_read failed\n");
@@ -90,14 +90,13 @@ static ssize_t mbx_write(struct file *filep, const char __user *buf,
 	struct mbx_device *mbx = to_mbx_dev(mdev);
 
 
-printk("mbx_write >> offset %08x\n", pos);
+printk("mbx_write >>>> offset %08x\n", pos);
 //	if (!mbx_offset_valid(pos))
 //		return -ERANGE;
 
 	rc = copy_from_user(&value, buf, sizeof(value));
 	if (rc)
 		return -EFAULT;
-pos = 0x000000E0;
 printk("mbx_write: value to write:%08x\n", value);
 	rc = fsi_device_write(mbx->fsi_dev, pos, &value, sizeof(value));
 	if (rc) {

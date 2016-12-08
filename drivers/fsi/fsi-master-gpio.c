@@ -378,7 +378,7 @@ static int fsi_master_gpio_read(struct fsi_master *_master, int link,
 	int rc;
 	unsigned long flags;
 
-printk("1207.1813 fsi_master_gpio_read >> link:%d slave:%d addr:%08x size:%d\n",
+printk("1207.1813  fsi_master_gpio_read >> link:%d slave:%d addr:%08x size:%d\n",
 				link, slave, addr, size);
 
 	if (link != 0)
