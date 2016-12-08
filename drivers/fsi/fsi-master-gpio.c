@@ -59,6 +59,7 @@
 #define	FSI_GPIO_MSG_ID_SIZE		2
 #define	FSI_GPIO_MSG_RESPID_SIZE	2
 #define	FSI_GPIO_PRIME_SLAVE_CLOCKS	100
+#define	FSI_GPIO_PRE_PRIME_CLOCKS	1000
 
 DEFINE_SPINLOCK(fsi_gpio_cmd_lock);	/* lock around all fsi commands */
 
@@ -181,6 +182,16 @@ static void echo_delay(struct fsi_master_gpio *master)
 {
 	set_sda_output(master, 1);
 	clock_toggle(master, FSI_ECHO_DELAY_CLOCKS);
+}
+
+/*
+ * Prime the slave by clocking it so that its ready for follow on
+ * read/write operations.
+ */
+static void prime_data(struct fsi_master_gpio *master)
+{
+	set_sda_output(master, 1);
+	clock_toggle(master, FSI_GPIO_PRE_PRIME_CLOCKS);
 }
 
 /*
@@ -382,6 +393,7 @@ printk("fsi_master_gpio_read >> link:%d slave:%d addr:%08x size:%d\n",
 	build_abs_ar_command(&cmd, FSI_GPIO_CMD_READ, slave, addr, size, NULL);
 
 	spin_lock_irqsave(&fsi_gpio_cmd_lock, flags);
+	prime_data(master);
 	serial_out(master, &cmd);
 	echo_delay(master);
 	rc = poll_for_response(master, FSI_GPIO_RESP_ACKD, size, val);
@@ -406,6 +418,7 @@ printk("fsi_master_gpio_write >> link:%d slave:%d addr:%08x val:%08x size:%d\n",
 	build_abs_ar_command(&cmd, FSI_GPIO_CMD_WRITE, slave, addr, size, val);
 
 	spin_lock_irqsave(&fsi_gpio_cmd_lock, flags);
+	prime_data(master);
 	serial_out(master, &cmd);
 	echo_delay(master);
 	rc = poll_for_response(master, FSI_GPIO_RESP_ACK, size, NULL);

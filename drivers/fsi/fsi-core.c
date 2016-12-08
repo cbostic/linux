@@ -109,9 +109,9 @@ int fsi_device_write(struct fsi_device *dev, uint32_t addr, const void *val,
 	if (addr + size > dev->size)
 		return -EINVAL;
 
-	return fsi_slave_write(dev->slave, addr, val, size);
-#else
 	return fsi_slave_write(dev->slave, dev->addr + addr, val, size);
+#else
+	return fsi_slave_write(dev->slave, addr, val, size);
 #endif
 }
 EXPORT_SYMBOL_GPL(fsi_device_write);
