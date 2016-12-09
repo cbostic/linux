@@ -59,9 +59,9 @@
 #define	FSI_GPIO_MSG_ID_SIZE		2
 #define	FSI_GPIO_MSG_RESPID_SIZE	2
 #define	FSI_GPIO_PRIME_SLAVE_CLOCKS	100
-#define	FSI_GPIO_PRE_PRIME_CLOCKS	1000
+#define	FSI_GPIO_PRE_PRIME_CLOCKS	32	/* 32-1000 OK,  16 not */
 
-#define FSI_CLOCK_BYPASS
+//#define FSI_CLOCK_BYPASS
 
 DEFINE_SPINLOCK(fsi_gpio_cmd_lock);	/* lock around all fsi commands */
 
@@ -402,7 +402,7 @@ static int fsi_master_gpio_read(struct fsi_master *_master, int link,
 	int rc;
 	unsigned long flags;
 
-printk("fsi_master_gpio_read >> link:%d slave:%d addr:%08x size:%d\n",
+printk("32a fsi_master_gpio_read >> link:%d slave:%d addr:%08x size:%d\n",
 				link, slave, addr, size);
 
 	if (link != 0)
