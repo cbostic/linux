@@ -61,6 +61,8 @@
 #define	FSI_GPIO_PRIME_SLAVE_CLOCKS	100
 #define	FSI_GPIO_PRE_PRIME_CLOCKS	1000
 
+#define FSI_CLOCK_BYPASS
+
 DEFINE_SPINLOCK(fsi_gpio_cmd_lock);	/* lock around all fsi commands */
 
 struct fsi_master_gpio {
@@ -70,6 +72,9 @@ struct fsi_master_gpio {
 	struct gpio_desc	*gpio_trans;	/* Voltage translator */
 	struct gpio_desc	*gpio_enable;	/* FSI enable */
 	struct gpio_desc	*gpio_mux;	/* Mux control */
+#ifdef FSI_CLOCK_BYPASS
+	void *gpio;
+#endif
 };
 
 #define to_fsi_master_gpio(m) container_of(m, struct fsi_master_gpio, master)
@@ -82,14 +87,27 @@ struct fsi_gpio_msg {
 static void clock_toggle(struct fsi_master_gpio *master, int count)
 {
 	int i;
+#ifdef FSI_CLOCK_BYPASS
+	unsigned int gpio;
+#endif
 
 	for (i = 0; i < count; i++) {
 		ndelay(FSI_GPIO_STD_DLY);
 //		udelay(100);
+#ifdef FSI_CLOCK_BYPASS
+		gpio = ioread32(master->gpio + 0x1e0);
+		iowrite32(gpio & ~0x00010000, master->gpio + 0x1e0);
+#else
 		gpiod_set_value(master->gpio_clk, 0);
+#endif
 		ndelay(FSI_GPIO_STD_DLY);
 //		udelay(100);
+#ifdef FSI_CLOCK_BYPASS
+		gpio = ioread32(master->gpio + 0x1e0);
+		iowrite32(gpio | 0x00010000, master->gpio + 0x1e0);
+#else
 		gpiod_set_value(master->gpio_clk, 1);
+#endif
 	}
 }
 
@@ -453,13 +471,21 @@ static int fsi_master_gpio_break(struct fsi_master *_master, int link)
 
 static void fsi_master_gpio_init(struct fsi_master_gpio *master)
 {
+#ifdef FSI_CLOCK_BYPASS
+	unsigned int gpio;
+#endif
 	if (master->gpio_mux)
 		gpiod_direction_output(master->gpio_mux, 1);
 	if (master->gpio_trans)
 		gpiod_direction_output(master->gpio_trans, 1);
 	if (master->gpio_enable)
 		gpiod_direction_output(master->gpio_enable, 1);
+#ifdef FSI_CLOCK_BYPASS
+	gpio = ioread32(master->gpio + 0x1e4);
+	iowrite32(gpio | 0x00010000, master->gpio + 0x1e4);
+#else
 	gpiod_direction_output(master->gpio_clk, 1);
+#endif
 	gpiod_direction_output(master->gpio_data, 1);
 
 	/* todo: evaluate if clocks can be reduced */
@@ -506,12 +532,26 @@ static int fsi_master_gpio_probe(struct platform_device *pdev)
 	if (!master)
 		return -ENOMEM;
 
+#ifdef FSI_CLOCK_BYPASS
+	master->gpio = ioremap(0x1E780000, 0x200);
+	if (!master->gpio) {
+		printk("fsi_master_gpio_probe can't map clock reg\n");
+		return -ENODEV;
+	}
+#endif
 	gpio = devm_gpiod_get(&pdev->dev, "clock", 0);
 	if (IS_ERR(gpio)) {
 		dev_dbg(&pdev->dev, "probe: failed to get clock pin\n");
+#ifndef FSI_CLOCK_BYPASS
 		return PTR_ERR(gpio);
+#endif
 	}
+#ifdef FSI_CLOCK_BYPASS
+	else
+		master->gpio_clk = gpio;
+#else
 	master->gpio_clk = gpio;
+#endif
 
 	gpio = devm_gpiod_get(&pdev->dev, "data", 0);
 	if (IS_ERR(gpio)) {
@@ -555,7 +595,12 @@ static int fsi_master_gpio_remove(struct platform_device *pdev)
 {
 	struct fsi_master_gpio *master = platform_get_drvdata(pdev);
 
+#ifdef FSI_CLOCK_BYPASS
+	if (master->gpio_clk)
+		devm_gpiod_put(&pdev->dev, master->gpio_clk);
+#else
 	devm_gpiod_put(&pdev->dev, master->gpio_clk);
+#endif
 	devm_gpiod_put(&pdev->dev, master->gpio_data);
 	if (master->gpio_trans)
 		devm_gpiod_put(&pdev->dev, master->gpio_trans);
