@@ -22,6 +22,7 @@
 struct fsi_master {
 	struct list_head my_slaves;
 	bool		slave_list;
+	u32		ipoll;
 	struct device	*dev;
 	int		idx;
 	int		n_links;
@@ -37,6 +38,7 @@ struct fsi_master {
 
 extern int fsi_master_register(struct fsi_master *master);
 extern void fsi_master_unregister(struct fsi_master *master);
+extern int fsi_master_start_ipoll(struct fsi_master *master);
 
 /**
  * crc4 helper: Given a starting crc4 state @c, calculate the crc4 vaue of @x,

@@ -17,8 +17,10 @@
 
 #include <linux/device.h>
 #include <linux/fsi.h>
+#include <linux/kthread.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/jiffies.h>
 
 #include "fsi-master.h"
 
@@ -38,9 +40,12 @@
 #define FSI_PEEK_BASE			0x410
 #define	FSI_SLAVE_BASE			0x800
 
+#define FSI_IPOLL_PERIOD		msecs_to_jiffies(1000)
+
 static const int engine_page_size = 0x400;
 
 static atomic_t master_idx = ATOMIC_INIT(-1);
+static struct task_struct *master_ipoll = NULL;
 
 struct fsi_slave {
 	struct list_head	list_link;	/* Master's list of slaves */
@@ -62,6 +67,8 @@ static int fsi_slave_write(struct fsi_slave *slave, uint32_t addr,
  * FSI slave engine control register offsets
  */
 #define	FSI_SMODE		0x0	/* R/W: Mode register */
+#define FSI_SI1M		0x18	/* R/W: Slave IRQ Mask register */
+#define FSI_SI1S		0x1C	/* R: Slave IRQ Status register */
 
 /*
  * SMODE fields
@@ -216,6 +223,7 @@ static int fsi_slave_scan(struct fsi_slave *slave)
 	uint32_t engine_addr;
 	uint32_t conf;
 	int rc, i;
+	u8 si1s_bit = 1;
 
 	INIT_LIST_HEAD(&slave->my_engines);
 
@@ -272,6 +280,7 @@ static int fsi_slave_scan(struct fsi_slave *slave)
 			dev->unit = i;
 			dev->addr = engine_addr;
 			dev->size = slots * engine_page_size;
+			dev->si1s_bit = si1s_bit++;
 
 			dev_info(&slave->dev,
 			"engine[%i]: type %x, version %x, addr %x size %x\n",
@@ -519,6 +528,58 @@ static void fsi_master_unscan(struct fsi_master *master)
 	master->slave_list = false;
 }
 
+static void fsi_master_irq(struct fsi_master *master, int link, u32 si1s)
+{
+	int i;
+	struct fsi_slave *slave;
+	struct fsi_device *fsi_dev;
+
+	if (list_empty(&master->my_slaves))
+		return;
+
+	slave = list_first_entry(&master->my_slaves, struct fsi_slave,
+				 list_link);
+
+	list_for_each_entry(fsi_dev, &slave->my_engines, link) {
+		if (si1s & (0x80000000 >> fsi_dev->si1s_bit) &&
+		    fsi_dev->irq_handler)
+			fsi_dev->irq_handler(0, &fsi_dev->dev);
+	}
+}
+
+static int fsi_master_ipoll(void *data)
+{
+	int rc;
+	u32 si1s;
+	unsigned long elapsed = 0;
+	unsigned long previous_jiffies = jiffies;
+	struct fsi_master *master = data;
+
+	set_current_state(TASK_UNINTERRUPTIBLE);
+
+	while (!kthread_should_stop()) {
+		if (!master->ipoll)
+			goto done;
+
+		/* ignore errors for now */
+		rc = master->read(master, 0, 0, FSI_SLAVE_BASE + FSI_SI1S,
+				  &si1s, sizeof(u32));
+		if (rc)
+			goto done;
+
+		if (si1s & master->ipoll)
+			fsi_master_irq(master, 0, si1s);
+done:
+		elapsed = jiffies - previous_jiffies;
+		if (elapsed < FSI_IPOLL_PERIOD)
+			schedule_timeout(FSI_IPOLL_PERIOD - elapsed);
+
+		previous_jiffies = jiffies;
+	}
+
+	return 0;
+}
+
 int fsi_master_register(struct fsi_master *master)
 {
 	master->idx = atomic_inc_return(&master_idx);
@@ -533,8 +594,32 @@ void fsi_master_unregister(struct fsi_master *master)
 {
 	fsi_master_unscan(master);
 	put_device(master->dev);
+
+	if (master_ipoll) {
+		kthread_stop(master_ipoll);
+		master_ipoll = NULL;
+	}
 }
 EXPORT_SYMBOL_GPL(fsi_master_unregister);
+
+int fsi_master_start_ipoll(struct fsi_master *master)
+{
+	if (master_ipoll) {
+		dev_err(master->dev, "already polling for irqs\n");
+		return -EALREADY;
+	}
+
+	master_ipoll = kthread_create(fsi_master_ipoll, master,
+				      "fsi_master_ipoll");
+	if (IS_ERR(master_ipoll)) {
+		dev_err(master->dev, "couldn't create ipoll thread rc:%d\n",
+			PTR_ERR(master_ipoll));
+		return PTR_ERR(master_ipoll);
+	}
+
+	wake_up_process(master_ipoll);
+}
+EXPORT_SYMBOL_GPL(fsi_master_start_ipoll);
 
 /* FSI core & Linux bus type definitions */
 
@@ -574,6 +659,63 @@ void fsi_driver_unregister(struct fsi_driver *fsi_drv)
 	driver_unregister(&fsi_drv->drv);
 }
 EXPORT_SYMBOL_GPL(fsi_driver_unregister);
+
+int fsi_enable_irq(struct fsi_device *dev)
+{
+	int rc;
+	u32 si1m;
+	u32 bit = 0x80000000 >> dev->si1s_bit;
+	struct fsi_master *master = dev->slave->master;
+
+	if (!dev->irq_handler)
+		return -EINVAL;
+
+	rc = master->read(master, 0, 0, FSI_SLAVE_BASE + FSI_SI1M, &si1m,
+			  sizeof(u32));
+	if (rc) {
+		dev_err(master->dev, "couldn't read si1m:%d\n", rc);
+		return rc;
+	}
+
+	si1m |= bit;
+	rc = master->write(master, 0, 0, FSI_SLAVE_BASE + FSI_SI1M, &si1m,
+			   sizeof(u32));
+	if (rc) {
+		dev_err(master->dev, "couldn't write si1m:%d\n", rc);
+		return rc;
+	}
+
+	master->ipoll |= bit;
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(fsi_enable_irq);
+
+void fsi_disable_irq(struct fsi_device *dev)
+{
+	int rc;
+	u32 si1m;
+	u32 bits = ~(0x80000000 >> dev->si1s_bit);
+	struct fsi_master *master = dev->slave->master;
+
+	master->ipoll &= bits;
+
+	rc = master->read(master, 0, 0, FSI_SLAVE_BASE + FSI_SI1M, &si1m,
+			  sizeof(u32));
+	if (rc) {
+		dev_err(master->dev, "couldn't read si1m:%d\n", rc);
+		return;
+	}
+
+	si1m &= bits;
+	rc = master->write(master, 0, 0, FSI_SLAVE_BASE + FSI_SI1M, &si1m,
+			   sizeof(u32));
+	if (rc) {
+		dev_err(master->dev, "couldn't write si1m:%d\n", rc);
+		return;
+	}
+}
+EXPORT_SYMBOL_GPL(fsi_disable_irq);
 
 struct bus_type fsi_bus_type = {
 	.name		= "fsi",
