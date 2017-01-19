@@ -517,6 +517,8 @@ static ssize_t store_scan(struct device *dev,
 	fsi_master_unregister(&master->master);
 	fsi_master_register(&master->master);
 
+	fsi_master_start_ipoll(&master->master);
+
 	return count;
 }
 
