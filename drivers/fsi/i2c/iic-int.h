@@ -34,10 +34,17 @@
 #define FSI_ENGID_I2C		0x7
 #define FSI_ENGID_I2C_BB	0x17
 
+#ifdef FSI_I2C_DEBUG
 #define IDBGs(num, msg, args...) printk(msg, ## args)
 #define IDBGd(num, msg, args...) printk(msg, ## args)
 #define IDBGf(num, msg, args...) printk(msg, ## args)
 #define IDBGl(num, msg, args...) printk(msg, ## args)
+#else
+#define IDBGs(num, msg, args...)
+#define IDBGd(num, msg, args...)
+#define IDBGf(num, msg, args...)
+#define IDBGl(num, msg, args...)
+#endif
 
 #define IENTER()
 #define IEXIT(RC)
@@ -47,10 +54,18 @@
 	printk("ERR: "msg, ## args)
 #define IFLDi(num, msg, args...)\
 	printk(msg, ## args)
+
+#ifdef FSI_I2C_DEBUG
 #define IFLDs(num, msg, args...) printk(msg, ## args)
 #define IFLDd(num, msg, args...) printk(msg, ## args)
 #define IFLDf(num, msg, args...) printk(msg, ## args)
 #define IFLDl(num, msg, args...) printk(msg, ## args)
+#else
+#define IFLDs(num, msg, args...)
+#define IFLDd(num, msg, args...)
+#define IFLDf(num, msg, args...)
+#define IFLDl(num, msg, args...)
+#endif
 
 #define iic_ffdc_loc(f)
 
