@@ -61,7 +61,7 @@
 #define	FSI_GPIO_PRIME_SLAVE_CLOCKS	100
 #define	FSI_GPIO_PRE_PRIME_CLOCKS	32	/* 32-1000 OK,  16 not */
 
-#define FSI_CLOCK_BYPASS
+//#define FSI_CLOCK_BYPASS
 
 DEFINE_SPINLOCK(fsi_gpio_cmd_lock);	/* lock around all fsi commands */
 
@@ -83,6 +83,9 @@ struct fsi_gpio_msg {
 	uint64_t	msg;
 	uint8_t		bits;
 };
+
+static int fsi_master_gpio_read(struct fsi_master *_master, int link,
+		uint8_t slave, uint32_t addr, void *val, size_t size);
 
 static void clock_toggle(struct fsi_master_gpio *master, int count)
 {
@@ -243,7 +246,7 @@ static int poll_for_response(struct fsi_master_gpio *master, uint8_t expected,
 				FSI_GPIO_MSG_RESPID_SIZE;
 	uint8_t crc_in;
 
-printk("poll_for_response >>\n");
+//printk("poll_for_response >>\n");
 	do {
 		for (i = 0; i < FSI_GPIO_MTOE_COUNT; i++) {
 			serial_in(master, &response, 1);
@@ -273,7 +276,7 @@ printk("      MTOE\n");
 		case FSI_GPIO_RESP_ACK:
 			if (expected == FSI_GPIO_RESP_ACKD)
 				bits_remaining = 8 * size;
-printk("      ACK\n");
+//printk("      ACK\n");
 			break;
 
 		case FSI_GPIO_RESP_BUSY:
@@ -282,7 +285,7 @@ printk("      ACK\n");
 			 * d-poll, not indicated in the hardware protocol
 			 * spec. < 20 clocks causes slave to hang, 21 ok.
 			 */
-printk("     BUSY\n");
+//printk("     BUSY\n");
 			set_sda_output(master, 1);
 			clock_toggle(master, FSI_GPIO_DPOLL_CLOCKS);
 			cmd.msg = FSI_GPIO_CMD_DPOLL;
@@ -301,7 +304,7 @@ printk("      ERRA: ERRC: %d\n", response_id);
 			 * only act on any response if crc is correct
 			 */
 			clock_toggle(master, FSI_GPIO_CRC_SIZE);
-			fsi_master_gpio_error(master, response.msg);
+			fsi_master_gpio_error(master, response_id);
 			return -EIO;
 		}
 
@@ -328,7 +331,7 @@ printk("     CRC mismatch\n");
 		}
 		/* Clock the slave enough to be ready for next operation */
 		clock_toggle(master, FSI_GPIO_PRIME_SLAVE_CLOCKS);
-printk("     return success\n");
+//printk("     return success\n");
 		return 0;
 
 	} while (busy_count++ < FSI_GPIO_MAX_BUSY);
@@ -402,8 +405,8 @@ static int fsi_master_gpio_read(struct fsi_master *_master, int link,
 	int rc;
 	unsigned long flags;
 
-printk("32a fsi_master_gpio_read >> link:%d slave:%d addr:%08x size:%d\n",
-				link, slave, addr, size);
+//printk("32a fsi_master_gpio_read >> link:%d slave:%d addr:%08x size:%d\n",
+//				link, slave, addr, size);
 
 	if (link != 0)
 		return -ENODEV;
@@ -427,9 +430,12 @@ static int fsi_master_gpio_write(struct fsi_master *_master, int link,
 	struct fsi_gpio_msg cmd;
 	int rc;
 	unsigned long flags;
+// DEBUG ONLY vvv
+	uint32_t value = *((uint32_t *)val);
+// DEBUG ONLY ^^^
 
-printk("fsi_master_gpio_write >> link:%d slave:%d addr:%08x val:%08x size:%d\n",
-				link, slave, addr, *((uint32_t *)val), size);
+//printk("fsi_master_gpio_write >> link:%d slave:%d addr:%08x val:%08x size:%d\n",
+//				link, slave, addr, *((uint32_t *)val), size);
 	if (link != 0)
 		return -ENODEV;
 
@@ -440,6 +446,12 @@ printk("fsi_master_gpio_write >> link:%d slave:%d addr:%08x val:%08x size:%d\n",
 	serial_out(master, &cmd);
 	echo_delay(master);
 	rc = poll_for_response(master, FSI_GPIO_RESP_ACK, size, NULL);
+// DEBUG ONLY vvv
+	if (value == 0xc0de0000) {
+		printk("fsi_master_gpio_write: BREAK to sub, post clk 4x\n");
+		clock_toggle(master, 4 * FSI_POST_BREAK_CLOCKS);
+	}
+// DEBUG ONLY ^^^
 	spin_unlock_irqrestore(&fsi_gpio_cmd_lock, flags);
 
 	return rc;

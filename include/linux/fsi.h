@@ -21,6 +21,8 @@
 struct fsi_device {
 	struct list_head	link;	/* for slave's list */
 	struct device		dev;
+	const struct fsi_device_id *id;
+	struct fsi_master	*master;
 	u8			engine_type;
 	u8			version;
 	u8			unit;
@@ -72,7 +74,12 @@ extern void fsi_driver_unregister(struct fsi_driver *);
 
 extern struct bus_type fsi_bus_type;
 
+extern struct fsi_master *fsi_get_link_master(struct fsi_device *dev);
+extern int fsi_set_next_master(struct fsi_device *dev,
+		struct fsi_master *master);
 extern int fsi_enable_irq(struct fsi_device *dev);
 extern void fsi_disable_irq(struct fsi_device *dev);
+
+#define FSI_MAX_LINKS	64
 
 #endif /* LINUX_FSI_H */

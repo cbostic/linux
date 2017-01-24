@@ -21,6 +21,7 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/jiffies.h>
+#include <linux/delay.h>
 
 #include "fsi-master.h"
 
@@ -51,7 +52,8 @@ struct fsi_slave {
 	struct list_head	list_link;	/* Master's list of slaves */
 	struct list_head	my_engines;
 	struct device		dev;
-	struct fsi_master	*master;
+	struct fsi_master	*master;	/* Controlling master */
+	struct fsi_master	*next_master;	/* Downstream master */
 	int			link;
 	uint8_t			id;
 };
@@ -88,8 +90,8 @@ static int fsi_slave_write(struct fsi_slave *slave, uint32_t addr,
 int fsi_device_read(struct fsi_device *dev, uint32_t addr, void *val,
 		size_t size)
 {
-	printk("fsi_device_read config offset >> addr:%08x size:%d\n",
-							addr, size);
+//	printk("fsi_device_read config offset >> addr:%08x size:%d\n",
+//							addr, size);
 #if 1
 	if (addr > dev->size)
 		return -EINVAL;
@@ -107,8 +109,8 @@ EXPORT_SYMBOL_GPL(fsi_device_read);
 int fsi_device_write(struct fsi_device *dev, uint32_t addr, const void *val,
 		size_t size)
 {
-	printk("fsi_device_write config offset >> addr:%08x val:%08x, size:%d\n",
-				addr, *((uint32_t *)val), size);
+//	printk("fsi_device_write config offset >> addr:%08x val:%08x, size:%d\n",
+//				addr, *((uint32_t *)val), size);
 #if 1
 	if (addr > dev->size)
 		return -EINVAL;
@@ -202,8 +204,8 @@ static inline uint32_t fsi_smode_sid(int x)
 static int fsi_slave_read(struct fsi_slave *slave, uint32_t addr,
 			void *val, size_t size)
 {
-printk("fsi_slave_read >> link:%d id:%d addr:%08x size:%d\n",
-			slave->link, slave->id, addr, size);
+//printk("fsi_slave_read >> link:%d id:%d addr:%08x size:%d\n",
+//			slave->link, slave->id, addr, size);
 	return slave->master->read(slave->master, slave->link,
 			slave->id, addr, val, size);
 }
@@ -211,9 +213,9 @@ printk("fsi_slave_read >> link:%d id:%d addr:%08x size:%d\n",
 static int fsi_slave_write(struct fsi_slave *slave, uint32_t addr,
 			const void *val, size_t size)
 {
-printk("fsi_slave_write >> link:%d id:%d addr:%08x val:%08x size:%d\n",
-			slave->link, slave->id, addr, *((uint32_t *)val),
-			size);
+//printk("fsi_slave_write >> link:%d id:%d addr:%08x val:%08x size:%d\n",
+//			slave->link, slave->id, addr, *((uint32_t *)val),
+//			size);
 	return slave->master->write(slave->master, slave->link,
 			slave->id, addr, val, size);
 }
@@ -383,6 +385,8 @@ static int fsi_slave_init(struct fsi_master *master,
 	int rc;
 	uint8_t crc;
 
+	printk("fsi_slave_init >> master id:%d\n", master->idx);
+
 	/*
 	 * todo: Due to CFAM hardware issues related to BREAK commands we're
 	 * limited to only one CFAM per link.  Once issues are resolved this
@@ -425,6 +429,8 @@ static int fsi_slave_init(struct fsi_master *master,
 	slave->dev.parent = master->dev;
 	slave->dev.release = fsi_slave_release;
 
+	printk("fsi_slave_init: dev_set_name slave@%02x:%02x\n",
+		link, slave_id);
 	dev_set_name(&slave->dev, "slave@%02x:%02x", link, slave_id);
 	rc = device_register(&slave->dev);
 	if (rc < 0) {
@@ -434,7 +440,10 @@ static int fsi_slave_init(struct fsi_master *master,
 		return rc;
 	}
 	list_add(&slave->list_link, &master->my_slaves);
+	printk("fsi_slave_init -> fsi_slave_scan\n");
 	fsi_slave_scan(slave);
+	printk("fsi_slave_init << master id:%d\n", master->idx);
+
 	return 0;
 }
 
@@ -464,24 +473,33 @@ static int fsi_master_scan(struct fsi_master *master)
 	int link, slave_id, rc;
 	uint32_t smode;
 
+	printk("fsi_master_scan >>\n");
 	if (!master->slave_list) {
 		INIT_LIST_HEAD(&master->my_slaves);
 		master->slave_list = true;
 	}
 
 	for (link = 0; link < master->n_links; link++) {
+		printk("fsi_master_scan for link:%d >>\n", link);
 		rc = fsi_master_link_enable(master, link);
 		if (rc) {
 			dev_dbg(master->dev,
 				"enable link:%d failed with:%d\n", link, rc);
+			printk("fsi_master_scan enable L %d fail with rc:%d\n",
+				link, rc);
 			continue;
 		}
+		printk("fsi_master_scan <-enable  break->\n");
 		rc = fsi_master_break(master, link);
 		if (rc) {
 			dev_dbg(master->dev,
 				"Break to link:%d failed with:%d\n", link, rc);
+			printk("fsi_master_scan break fail with %d\n", rc);
 			continue;
 		}
+
+		/* Wait for BREAK to take effect */
+		udelay(200);
 
 		/*
 		 * Verify can read slave at default ID location. If fails
@@ -493,15 +511,12 @@ static int fsi_master_scan(struct fsi_master *master)
 			dev_dbg(master->dev,
 				"Read link:%d smode default id failed:%d\n",
 				link, rc);
+			printk("fsi_master_scan read SMODE failed\n");
 			continue;
 		}
 
-// DEBUG ONLY vvv
 		for (slave_id = 0; slave_id < FSI_N_SLAVES; slave_id++)
 			fsi_slave_init(master, link, slave_id);
-//			fsi_slave_init(master, link, 0);
-printk("back to scanning slaves 0-3 on link 0\n");
-// DEBUG ONLY ^^^
 	}
 
 	return 0;
@@ -528,9 +543,26 @@ static void fsi_master_unscan(struct fsi_master *master)
 	master->slave_list = false;
 }
 
+struct fsi_master *fsi_get_link_master(struct fsi_device *fsi_dev)
+{
+	if (fsi_dev && fsi_dev->slave)
+		return fsi_dev->slave->next_master;
+	return NULL;
+}
+EXPORT_SYMBOL_GPL(fsi_get_link_master);
+
+int fsi_set_next_master(struct fsi_device *fsi_dev, struct fsi_master *master)
+{
+	if (fsi_dev && fsi_dev->slave) {
+		fsi_dev->slave->next_master = master;
+		return 0;
+	}
+	return -EINVAL;
+}
+EXPORT_SYMBOL_GPL(fsi_set_next_master);
+
 static void fsi_master_irq(struct fsi_master *master, int link, u32 si1s)
 {
-	int i;
 	struct fsi_slave *slave;
 	struct fsi_device *fsi_dev;
 
@@ -555,8 +587,6 @@ static int fsi_master_ipoll(void *data)
 	unsigned long previous_jiffies = jiffies;
 	struct fsi_master *master = data;
 
-	set_current_state(TASK_UNINTERRUPTIBLE);
-
 	while (!kthread_should_stop()) {
 		if (!master->ipoll)
 			goto done;
@@ -571,9 +601,10 @@ static int fsi_master_ipoll(void *data)
 			fsi_master_irq(master, 0, si1s);
 done:
 		elapsed = jiffies - previous_jiffies;
-		if (elapsed < FSI_IPOLL_PERIOD)
+		if (elapsed < FSI_IPOLL_PERIOD) {
+			set_current_state(TASK_UNINTERRUPTIBLE);
 			schedule_timeout(FSI_IPOLL_PERIOD - elapsed);
-
+		}
 		previous_jiffies = jiffies;
 	}
 
@@ -582,10 +613,12 @@ done:
 
 int fsi_master_register(struct fsi_master *master)
 {
+	printk("fsi_master_register >>\n");
 	master->idx = atomic_inc_return(&master_idx);
 	master->slave_list = false;
 	get_device(master->dev);
 	fsi_master_scan(master);
+	printk("fsi_master_register <<\n");
 	return 0;
 }
 EXPORT_SYMBOL_GPL(fsi_master_register);
@@ -636,8 +669,10 @@ static int fsi_bus_match(struct device *dev, struct device_driver *drv)
 		if (id->engine_type != fsi_dev->engine_type)
 			continue;
 		if (id->version == FSI_VERSION_ANY ||
-				id->version == fsi_dev->version)
+				id->version == fsi_dev->version) {
+			fsi_dev->id = id;
 			return 1;
+		}
 	}
 
 	return 0;

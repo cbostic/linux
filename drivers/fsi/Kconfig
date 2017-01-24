@@ -24,6 +24,12 @@ config FSI_MASTER_GPIO
 	---help---
 	This option enables a FSI master driver using GPIO lines.
 
+config FSI_MASTER_HUB
+	tristate "Hub FSI master"
+	depends on FSI
+	---help---
+	This option enables a FSI hub master driver.
+
 config FSI_SCOM
 	tristate "SCOM FSI client device driver"
 	depends on FSI
