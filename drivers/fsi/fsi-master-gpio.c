@@ -61,7 +61,7 @@
 #define	FSI_GPIO_PRIME_SLAVE_CLOCKS	100
 #define	FSI_GPIO_PRE_PRIME_CLOCKS	32	/* 32-1000 OK,  16 not */
 
-//#define FSI_CLOCK_BYPASS
+#define FSI_CLOCK_BYPASS
 
 DEFINE_SPINLOCK(fsi_gpio_cmd_lock);	/* lock around all fsi commands */
 
@@ -256,7 +256,7 @@ static int poll_for_response(struct fsi_master_gpio *master, uint8_t expected,
 		if (i >= FSI_GPIO_MTOE_COUNT) {
 			dev_dbg(master->master.dev,
 				"Master time out waiting for response\n");
-printk("      MTOE\n");
+//printk("      MTOE\n");
 			drain_response(master);
 			fsi_master_gpio_error(master, FSI_GPIO_MTOE);
 			return -EIO;
