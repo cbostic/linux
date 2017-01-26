@@ -90,7 +90,7 @@ void iic_boe_dma_callback(int dma_rc, void* ffdc, void* data);
 int iic_boe_check_ddr4_nack(iic_xfr_t *xfr);
 
 static const char iic_boe_version[] = "2.0019";
-static unsigned int _clock_divider = 4;
+static unsigned int _clock_divider = 6;
 
 static iic_eng_ops_t eng_ops = {
 	.use_dma = &iic_boe_use_dma,
