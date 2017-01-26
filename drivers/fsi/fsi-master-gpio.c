@@ -599,6 +599,7 @@ static int fsi_master_gpio_probe(struct platform_device *pdev)
 	master->master.write = fsi_master_gpio_write;
 	master->master.send_break = fsi_master_gpio_break;
 	master->master.link_enable = fsi_master_gpio_link_enable;
+	master->master.dev = &pdev->dev;
 	platform_set_drvdata(pdev, master);
 
 	return device_create_file(&pdev->dev, &dev_attr_scan);

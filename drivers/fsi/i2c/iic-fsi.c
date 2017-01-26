@@ -212,6 +212,7 @@ static const struct fsi_driver i2c_drv = {
 		.name = "iic_fsi_dd",
 		.bus = &fsi_bus_type,
 		.probe = iic_fsi_probe,
+		.remove = iic_fsi_remove,
 	}
 };
 

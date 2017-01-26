@@ -1921,18 +1921,16 @@ skip_check:
 		switch(cmd)
 		{
 			case IIC_W(IIC_IOC_SPEED):
-				if((val < 1) || (val > 1000))
+				if((val < 1) || (val > 55))
 				{
 					ret = -EINVAL;
 					break;
 				}
 				ret = eng->ops->set_speed(client->bus, 
-							  val * 1000);
-				if(ret > 0)
-					ret = ret / 1000;
+							  val);
 				break;
 			case IIC_R(IIC_IOC_SPEED):
-				val = eng->ops->get_speed(client->bus) / 1000;
+				val = eng->ops->get_speed(client->bus);
 				break;
 			case IIC_W(IIC_IOC_DEV_ADDR):
 				xfr_opts->dev_addr = val;

@@ -52,8 +52,7 @@
  * order to compensate for truncation errors --  It's better to be a little
  * slow than to be a little too fast.
  */
-#define IIC_BOE_HZ2DIV(lb_hz, iic_hz) \
-	(((lb_hz) < (iic_hz))? 0:((((lb_hz) / (iic_hz)) - 1) / 4))
+#define IIC_BOE_HZ2DIV(lb_hz, iic_hz) _clock_divider
 #define IIC_BOE_DIV2HZ(lb_hz, d) \
 	((lb_hz) / ((4 * ((d) + 1)) + 1))
 
@@ -91,6 +90,7 @@ void iic_boe_dma_callback(int dma_rc, void* ffdc, void* data);
 int iic_boe_check_ddr4_nack(iic_xfr_t *xfr);
 
 static const char iic_boe_version[] = "2.0019";
+static unsigned int _clock_divider = 4;
 
 static iic_eng_ops_t eng_ops = {
 	.use_dma = &iic_boe_use_dma,
@@ -125,21 +125,12 @@ static iic_eng_ops_t eng_ops = {
 #define IIC_BOE_MAX_CLKDIV 0x0FFF
 int iic_boe_set_speed(iic_bus_t* bus, int i2c_hz)
 {
-	int actual_hz;
-	int clk_div = IIC_BOE_HZ2DIV(bus->eng->bus_speed, i2c_hz);
-	if(clk_div & ~IIC_BOE_MAX_CLKDIV)
-		clk_div = IIC_BOE_MAX_CLKDIV;
-	actual_hz = IIC_BOE_DIV2HZ(bus->eng->bus_speed, clk_div);
-	bus->i2c_hz = i2c_hz;
-	return actual_hz;
+	_clock_divider = i2c_hz;
 }
 
 int iic_boe_get_speed(iic_bus_t* bus)
 {
-	int clk_div = IIC_BOE_HZ2DIV(bus->eng->bus_speed, bus->i2c_hz);
-	if(clk_div & ~IIC_BOE_MAX_CLKDIV)
-		clk_div = IIC_BOE_MAX_CLKDIV;
-	return IIC_BOE_DIV2HZ(bus->eng->bus_speed, clk_div);
+	return _clock_divider;
 }
 
 void iic_boe_display_regs(iic_eng_t* eng, iic_ffdc_t** ffdc)
