@@ -29,6 +29,7 @@
 #include "iic-int.h"
 #include "iic-boe.h"
 #include <linux/fsi.h>
+#include <asm/unaligned.h>
 
 /* Wrappers around the register access functions allow for access
  * over different types of busses (i.e. FSI or OPB).
@@ -191,9 +192,6 @@ int iic_boe_use_dma(iic_xfr_t* xfr)
 	else
 		flags |= DMA_XFER_WRITE;
 
-	rc = dma_setup(xfr->ubuf, xfr->client->bus->eng->base,
-			xfr->size, flags, &xfr->dma_key, 0);
-
 	if(rc)
 	{
 		IFLDe(2, "bus[%08lx]: dma_setup() = %d\n", 
@@ -309,16 +307,10 @@ exit:
 	return ret;
 }
 
-#define pg_nr(x) \
-(((((unsigned long)x->ubuf + x->bytes_xfrd) & PAGE_MASK) - \
-	((unsigned long)x->ubuf & PAGE_MASK)) >> PAGE_SHIFT )
 int iic_boe_fifo_to_usr(iic_eng_t* eng, iic_xfr_t* xfr, unsigned long bytes)
 {
 	int rc = 0;
 	char* uptr;
-	void *pageaddr = NULL;
-	struct page *page;
-	unsigned long flags = 0;
 	unsigned long bytes_left;
 	unsigned long end = xfr->bytes_xfrd + bytes;
 	char dummy[4];
@@ -326,68 +318,32 @@ int iic_boe_fifo_to_usr(iic_eng_t* eng, iic_xfr_t* xfr, unsigned long bytes)
 	IENTER();
 	while((xfr->bytes_xfrd < end) && !rc)
 	{
-		page = xfr->pages[pg_nr(xfr)];
-		uptr = (char *)page_address(page);
+		uptr = &xfr->buf[xfr->bytes_xfrd];
 
-		if (!uptr) {
-			/*
-			 * The data is on an unmapped page in high memory, so
-			 * we need to kmap it.
-			 *
-			 * If this is our first kmap in the loop, then disable
-			 * interrupts so we can call kmap_atomic.  Otherwise,
-			 * interrupts have already been disabled, so just unmap
-			 * the previously mapped page so we can map the next
-			 * one.
-			 */
-			if (!pageaddr)
-				local_irq_save(flags);
-			else
-				kunmap_atomic(pageaddr);
-
-			uptr = pageaddr = kmap_atomic(page);
-		}
-
-		uptr += (xfr->bytes_xfrd + (unsigned long)xfr->ubuf) & 
-			                                  ~PAGE_MASK;
 		bytes_left = end - xfr->bytes_xfrd;
 		if (xfr->bytes_xfrd >= xfr->size) {
 			IFLDe(2, "buffer is full, but fifo still has data\n");
 			uptr = dummy;
 		}
-		switch(((unsigned long)uptr) & 0x00000003)
-		{
-			case 0: /* 4 byte aligned */
-				if(bytes_left >= 4)
-				{
-					rc = iic_readw(eng, IIC_BOE_FIFO,
-					     (long*)uptr, &xfr->ffdc);
-//printk("iic boe read %08x\n", *((long *)uptr));
-					xfr->bytes_xfrd += 4;
-					break;
-				}
-			case 2: /* 2 byte aligned */
-				if(bytes_left >= 2)
-				{
-					iic_readh(eng, IIC_BOE_FIFO,
-					     (short*)uptr, &xfr->ffdc);
-					xfr->bytes_xfrd += 2;
-//printk("iic boe read %04x\n", *((short *)uptr));
-					break;
-				}
-			default: /* 1 byte aligned */
-				iic_readb(eng, IIC_BOE_FIFO, uptr, &xfr->ffdc);
-				xfr->bytes_xfrd++;
-//printk("iic boe read %02x\n", *uptr);
+		if(bytes_left >= 4) {
+			rc = iic_readw(eng, IIC_BOE_FIFO, (long *)dummy, &xfr->ffdc);
+			uptr[0] = dummy[3];
+			uptr[1] = dummy[2];
+			uptr[2] = dummy[1];
+			uptr[3] = dummy[0];
+			xfr->bytes_xfrd += 4;
+		} else if(bytes_left >= 2) {
+			iic_readh(eng, IIC_BOE_FIFO, (short *)dummy, &xfr->ffdc);
+			uptr[0] = dummy[1];
+			uptr[1] = dummy[0];
+			xfr->bytes_xfrd += 2;
+		} else {
+			iic_readb(eng, IIC_BOE_FIFO, uptr, &xfr->ffdc);
+			xfr->bytes_xfrd++;
 		}
 	}
 	if (xfr->bytes_xfrd > xfr->size)
 		xfr->bytes_xfrd = xfr->size;
-
-	if (pageaddr) {
-		kunmap_atomic(pageaddr);
-		local_irq_restore(flags);
-	}
 
 //	iic_ffdc_loc(&xfr->ffdc);
 	IEXIT(rc);
@@ -397,68 +353,31 @@ int iic_boe_fifo_to_usr(iic_eng_t* eng, iic_xfr_t* xfr, unsigned long bytes)
 int iic_boe_usr_to_fifo(iic_eng_t* eng, iic_xfr_t* xfr, unsigned long bytes)
 {
 	int rc = 0;
+	u16 half;
+	u32 word;
 	char* uptr;
-	void *pageaddr = NULL;
-	struct page *page;
-	unsigned long flags = 0;
 	unsigned long bytes_left;
 	unsigned long end = xfr->bytes_xfrd + bytes;
 
 	IENTER();
 	while((xfr->bytes_xfrd < end) && !rc)
 	{
-		page = xfr->pages[pg_nr(xfr)];
-		uptr = (char *)page_address(page);
+		uptr = &xfr->buf[xfr->bytes_xfrd];
 
-		if (!uptr) {
-			/*
-			 * The data is on an unmapped page in high memory, so
-			 * we need to kmap it.
-			 *
-			 * If this is our first kmap in the loop, then disable
-			 * interrupts so we can call kmap_atomic.  Otherwise,
-			 * interrupts have already been disabled, so just unmap
-			 * the previously mapped page so we can map the next
-			 * one.
-			 */
-			if (!pageaddr)
-				local_irq_save(flags);
-			else
-				kunmap_atomic(pageaddr);
-
-			uptr = pageaddr = kmap_atomic(page);
-		}
-
-		uptr += (xfr->bytes_xfrd + (unsigned long)xfr->ubuf) & 
-			                                  ~PAGE_MASK;
 		bytes_left = end - xfr->bytes_xfrd;
-		switch((unsigned long)uptr & 0x00000003)
-		{
-			case 0: /* 4 byte aligned and 4 or more bytes left */
-				if(bytes_left >= 4)
-				{
-					rc = iic_writew(eng, IIC_BOE_FIFO,
-					     *((long*)uptr), &xfr->ffdc);
-					xfr->bytes_xfrd += 4;
-					break;
-				}
-			case 2: /* 2 byte aligned and 2 or more bytes left */
-				if(bytes_left >= 2)
-				{
-					iic_writeh(eng, IIC_BOE_FIFO,
-					     *((short*)uptr), &xfr->ffdc);
-					xfr->bytes_xfrd += 2;
-					break;
-				}
-			default: /* 1 byte aligned and 1 or more bytes left */
-				iic_writeb(eng, IIC_BOE_FIFO, *uptr, &xfr->ffdc);
-				xfr->bytes_xfrd++;
-		}
-	}
+		if(bytes_left >= 4) {
+			word = cpu_to_be32(get_unaligned((long *)uptr));
 
-	if (pageaddr) {
-		kunmap_atomic(pageaddr);
-		local_irq_restore(flags);
+			rc = iic_writew(eng, IIC_BOE_FIFO, word, &xfr->ffdc);
+			xfr->bytes_xfrd += 4;
+		} else if(bytes_left >= 2) {
+			half = cpu_to_be16(get_unaligned((short *)uptr));
+			iic_writeh(eng, IIC_BOE_FIFO, half, &xfr->ffdc);
+			xfr->bytes_xfrd += 2;
+		} else {
+			iic_writeb(eng, IIC_BOE_FIFO, *uptr, &xfr->ffdc);
+			xfr->bytes_xfrd++;
+		}
 	}
 
 //	iic_ffdc_loc(&xfr->ffdc);
@@ -492,7 +411,7 @@ int iic_boe_int_handler(int irq,
 	unsigned long fifo_left = 0;
 	
 	IENTER();
-printk("iic boe interrupt handler!\n");	
+
 	/* Mask all IIC interrupts for this engine */
 	rc = iic_writew(eng, IIC_BOE_INT_MASK, 0, &ffdc);
 	if(rc)

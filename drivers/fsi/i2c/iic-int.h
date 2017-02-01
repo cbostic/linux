@@ -136,10 +136,8 @@ struct iic_xfr
     struct timer_list delay;		// pops when a write delay ends
     struct list_head q_entry;		// entry on engine q
     struct kiocb *iocb;
-    char* ubuf;				// User space buffer
-    char* kbuf;				// Kernel space buffer
+    char* buf;				// Kernel space buffer
     unsigned long num_pages;
-    struct page** pages;		// for direct io (reads)
     unsigned long size;			// size of the transfer
     unsigned long bytes_xfrd;		// bytes transfered so far
     int status;				// return status of this transfer
