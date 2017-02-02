@@ -238,7 +238,7 @@ static void fsi_master_gpio_error(struct fsi_master_gpio *master, int error)
 static int poll_for_response(struct fsi_master_gpio *master, uint8_t expected,
 			uint8_t size, void *data)
 {
-	int busy_count = 0, i;
+	int busy_count = 0, i, j;
 	struct fsi_gpio_msg response, cmd;
 	int bits_remaining = 0, bit_count, response_id, id;
 	uint64_t resp = 0;
@@ -314,7 +314,8 @@ printk("      ERRA: ERRC: %d\n", response_id);
 			resp <<= bits_remaining;
 			resp |= response.msg;
 			bits_received += bits_remaining;
-			*((uint32_t *)data) = response.msg;
+			for (j = 0; j < size; ++j)
+				((uint8_t *)data)[j] = ((uint8_t *)&response.msg)[j];
 		}
 
 		crc_in = fsi_crc4(0, resp | (0x1ULL << bits_received),

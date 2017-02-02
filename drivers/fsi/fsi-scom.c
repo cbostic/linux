@@ -32,6 +32,7 @@
 #define SCOM_DATA1_REG		0x04
 #define SCOM_CMD_REG		0x08
 #define SCOM_RESET_REG		0x1C
+#define SCOM_STATUS_REG		0x1C
 
 #define SCOM_RESET_CMD		0x80000000
 #define SCOM_WRITE_CMD		0x80000000
@@ -163,6 +164,23 @@ static const struct file_operations scom_fops = {
 	.write	= scom_write,
 };
 
+static ssize_t show_status_register(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	int rc;
+	u32 status;
+	struct fsi_device *fsi_dev = to_fsi_dev(dev);
+
+	rc = fsi_device_read(fsi_dev, SCOM_STATUS_REG, &status, sizeof(u32));
+	if (rc)
+		return rc;
+
+	rc = snprintf(buf, PAGE_SIZE - 1, "%08x\n", status);
+
+	return rc;
+}
+DEVICE_ATTR(status, S_IRUGO, show_status_register, NULL);
+
 static int scom_probe(struct device *dev)
 {
 	struct fsi_device *fsi_dev = to_fsi_dev(dev);
@@ -180,6 +198,8 @@ static int scom_probe(struct device *dev)
 	scom->mdev.name = scom->name;
 	scom->mdev.parent = dev;
 	list_add(&scom->link, &scom_devices);
+
+	device_create_file(dev, &dev_attr_status);
 
 	return misc_register(&scom->mdev);
 }

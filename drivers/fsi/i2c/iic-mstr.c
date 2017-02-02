@@ -353,22 +353,6 @@ void iic_cleanup_xfr(iic_xfr_t* xfr, dd_ffdc_t ** o_ffdc)
 	int i;
 	IENTER();
 
-	if(xfr->pages)
-	{
-		for(i = 0; i < xfr->num_pages; i++)
-		{
-			SetPageDirty(xfr->pages[i]);
-			//flush_dcache_page(xfr->pages[i]);
-			put_page(xfr->pages[i]);
-		}
-		kfree(xfr->pages);
-		xfr->pages = 0;
-	}
-	if(xfr->kbuf)
-	{
-		kfree(xfr->kbuf);
-		xfr->kbuf = 0;
-	}
 	del_timer(&xfr->delay);
 	del_timer(&xfr->timeout);
 	kfree(xfr);
@@ -409,7 +393,7 @@ int iic_create_xfr(iic_client_t* client, struct kiocb* iocb,
 	xfr->client = client;
 	xfr->iocb = iocb;
 	xfr->flags = flags;
-	xfr->ubuf = (char*)buf;
+	xfr->buf = (char*)buf;
 	xfr->size = len;
 	xfr->pid = current->pid;
 
@@ -458,21 +442,21 @@ int iic_create_xfr(iic_client_t* client, struct kiocb* iocb,
 
 
 		/* client data buffer in user or kernel space? */
-		if(client->flags & IIC_CLIENT_SOURCE_USER)
-		{
-			rc = copy_from_user(&data[start], xfr->ubuf, data_sz);
-			if(rc)
-			{
-				xfr->status = rc;
+//		if(client->flags & IIC_CLIENT_SOURCE_USER)
+//		{
+//			rc = copy_from_user(&data[start], xfr->ubuf, data_sz);
+//			if(rc)
+//			{
+//				xfr->status = rc;
 //				iic_fill_xfr_ffdc(xfr, &xfr->ffdc);
 //				iic_ffdc_loc(&xfr->ffdc);
-				goto error;
-			}
-		}
-		else
-		{
-			memcpy(&data[start], xfr->ubuf, data_sz);
-		}
+	//			goto error;
+//			}
+//		}
+//		else
+//		{
+//			memcpy(&data[start], xfr->ubuf, data_sz);
+//		}
 	}
 
 	/* prevent split numbers that just have one bit set (0x800,
@@ -509,61 +493,6 @@ int iic_create_xfr(iic_client_t* client, struct kiocb* iocb,
 	 */
 	if(!test_bit(IIC_XFR_DMA, &xfr->flags) || xfr->opts.recovery.redo_pol)
 	{
-		if(client->flags & IIC_CLIENT_SOURCE_USER)
-		{
-			struct page **pages = 0;
-
-			/* For read operations that don't use DMA, the device driver
-			 * is responsible for copying the data directly to the user
-			 * buffer.  In order to do this from an interrupt context,
-			 * we must call get_user_pages, which pins the user buffer
-			 * for us.
-			 */
-
-			/* copied from drivers/scsi/st.c */
-			xfr->num_pages = (((unsigned long)buf & ~PAGE_MASK) +
-					  len + ~PAGE_MASK) >> PAGE_SHIFT;
-			pages = kmalloc(xfr->num_pages * sizeof(*pages), 
-					GFP_KERNEL);
-			if(!pages)
-			{
-				IFLDe(1, 
-				     "kmalloc page array failed,"
-				     " num pages requested:%ul\n",
-				     (unsigned int)xfr->num_pages);
-				rc = -ENOMEM;
-				goto error;
-			}
-
-			down_read(&current->mm->mmap_sem);
-
-			/* Map user pages into kernel space */
-			rc = get_user_pages_remote(current, current->mm,
-						   (unsigned long)buf,
-						   xfr->num_pages, 1, 0, pages,
-						   0);
-			up_read(&current->mm->mmap_sem);
-			if(rc != xfr->num_pages)
-			{
-				IFLDe(3, "get_user_pages failed. ret:%d "
-				     " req:%ul userbuf:%p\n",
-				     rc, (unsigned int)xfr->num_pages, buf);
-				if(rc > 0)
-				{
-					for(i = 0; i < rc; i++)
-					{
-						put_page(pages[i]);
-					}
-				}
-				kfree(pages);
-				goto error;
-			}
-			xfr->pages = pages;
-		}
-		else
-		{
-			xfr->pages = NULL;
-		}
 		rc = 0;
 	}
 
@@ -571,10 +500,6 @@ int iic_create_xfr(iic_client_t* client, struct kiocb* iocb,
 	goto exit;
 		
 error:
-	if(xfr->kbuf)
-	{
-		kfree(xfr->kbuf);
-	}
 	kfree(xfr);
 	*new_xfr = 0;
 
@@ -1402,6 +1327,7 @@ ssize_t iic_read(struct file *filp, char __user *buf, size_t count,
 		 loff_t *offset)
 {
 	ssize_t rc = count;
+	char *kbuf;
 	iic_client_t *client = (iic_client_t*)filp->private_data;
 
 	IENTER();
@@ -1423,7 +1349,18 @@ ssize_t iic_read(struct file *filp, char __user *buf, size_t count,
 		goto exit;
 	}
 
-	rc = iic_common_read(client, (void*)buf, count, offset, NULL);
+	kbuf = kzalloc(count, GFP_KERNEL);
+	if (!kbuf) {
+		rc = -ENOMEM;
+		goto exit;
+	}
+
+	rc = iic_common_read(client, kbuf, count, offset, NULL);
+
+	copy_to_user(buf, kbuf, count);
+
+	kfree(kbuf);
+
 exit:
 	IEXIT(rc);
 	return rc;
@@ -1502,6 +1439,7 @@ ssize_t iic_write(struct file *filp, const char __user *buf, size_t count,
 	       	  loff_t *offset)
 {
 	ssize_t rc = count;
+	char *kbuf;
 	iic_client_t *client = (iic_client_t*)filp->private_data;
 
 	IENTER();
@@ -1523,7 +1461,19 @@ ssize_t iic_write(struct file *filp, const char __user *buf, size_t count,
 		rc = -EFAULT;
 		goto exit;
 	}
-	rc = iic_common_write(client, (void*)buf, count, offset, NULL);
+
+	kbuf = kzalloc(count, GFP_KERNEL);
+	if (!kbuf) {
+		rc = -ENOMEM;
+		goto exit;
+	}
+
+	copy_from_user(kbuf, buf, count);
+
+	rc = iic_common_write(client, kbuf, count, offset, NULL);
+
+	kfree(kbuf);
+
 exit:
 	IEXIT(rc);
 	return rc;
